@@ -62,7 +62,7 @@ user did not exist, so its unit never started — a class `up` cannot see at all
 ```sh
 scripts/duck-sim                # a MuJoCo window opens, the duck stands up, and it is yours
 scripts/duck-sim status         # health, and whether it is standing
-scripts/duck-sim drive          # walk forward for 8 s (args: vx vyaw, default 0.15 0)
+scripts/duck-sim drive          # walk forward for 8 s (args: vx vyaw, default 0.3 0)
 scripts/duck-sim ctl health     # anything robotctl does, aimed at this duck
 scripts/duck-sim monitor        # robotctl monitor: joints, IMU, ToF, sticks
 scripts/duck-sim log            # robotd's log
@@ -177,6 +177,10 @@ they cannot balance it. `scripts/duck-sim realtime` reports the factor, and `boo
 many ducks, or too many cameras, and the ducks do not get slow — they go *unhealthy* at the 45 Hz
 gate, and in the container form the updater starts rolling releases back. Fewer ducks, fewer
 cameras, or a headless viewer are the fixes, in that order.
+
+**A slow command stands still.** The shipped walk networks answer 0.15 m/s by shifting their
+weight and staying put, in `microduck_rl`'s own player as much as here; 0.3 walks. A duck that
+reports `walk` and does not move is being asked for too little before it is broken.
 
 **Ducks do not hot-join.** MuJoCo compiles its model, so changing the number of ducks restarts the
 simulator. The daemons survive that: `RemoteIo` reconnects on the next tick, and a duck whose body

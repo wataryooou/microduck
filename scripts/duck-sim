@@ -619,6 +619,22 @@ has_camera() {
     esac
 }
 
+# **`mjpython` looks for libpython beside the venv, and a uv venv has none there.** The launcher
+# dlopens `.venv/bin/../lib/libpython3.x.dylib`; uv's interpreters keep theirs in their own install,
+# so the body dies before MuJoCo loads with `Library not loaded: @executable_path/../lib/...` in
+# `body.log` and no window. `DYLD_LIBRARY_PATH` cannot carry the answer: the body is launched through
+# `/usr/bin/nohup`, and macOS strips `DYLD_*` from anything it protects. A link where the launcher
+# looks is the fix that survives that. `uv sync` recreating the venv drops it, so it is checked every
+# start rather than once.
+link_libpython() {
+    libdir="$("$RL/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR") or "")')"
+    lib="libpython$("$RL/.venv/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])').dylib"
+    [ -e "$RL/.venv/lib/$lib" ] && return 0
+    [ -f "$libdir/$lib" ] || return 0
+    say "linking $lib into $RL/.venv — mjpython looks for it there"
+    ln -s "$libdir/$lib" "$RL/.venv/lib/$lib"
+}
+
 # The body, on the host in both modes: MuJoCo is not going in a container, and the container shares
 # the host's network namespace so localhost is the same localhost either way.
 start_body() {
@@ -637,6 +653,7 @@ start_body() {
     PY_BIN="$RL/.venv/bin/python"
     if [ -z "$HEADLESS" ] && [ "$(uname -s)" = Darwin ] && [ -x "$RL/.venv/bin/mjpython" ]; then
         PY_BIN="$RL/.venv/bin/mjpython"
+        link_libpython
     fi
     # **Backgrounded directly, and in its own session.** `( cd X && nohup cmd & echo $! )` records
     # the *subshell's* pid, because `A && B & C` parses as `(A && B) & C` — so `down` killed a
@@ -718,10 +735,16 @@ wait_for_socket() {
 # smallest client that sends one. Resent at 10 Hz because `robotd` expires an intent 500 ms after
 # they stop arriving, which is what makes a dropped connection stop the robot rather than run it
 # into a wall.
+#
+# **0.3 m/s, because 0.15 stands still.** The shipped walk networks answer a slow command by
+# shifting their weight and staying put — `robotd` reports `walk` driving at 0.15 applied, and the
+# trunk does not move. That is the network, not the daemon: `microduck_rl`'s `infer_policy.py`
+# gives the same 0.00 m/s at 0.15 with no daemon involved, and walks at 0.3. 0.3 is also the
+# gamepad's full stick, so the default is what a person driving would ask for.
 drive() {
     [ -S "$SOCK" ] || die "no duck. \`scripts/duck-sim\` first."
     say "walking forward for 8 s"
-    python3 - "$SOCK" "${1:-0.15}" "${2:-0.0}" <<'PY'
+    python3 - "$SOCK" "${1:-0.3}" "${2:-0.0}" <<'PY'
 import json, socket, sys, time
 sock, vx, vyaw = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
 s = socket.socket(socket.AF_UNIX); s.connect(sock)
