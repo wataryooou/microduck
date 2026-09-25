@@ -63,6 +63,7 @@ user did not exist, so its unit never started — a class `up` cannot see at all
 scripts/duck-sim                # a MuJoCo window opens, the duck stands up, and it is yours
 scripts/duck-sim status         # health, and whether it is standing
 scripts/duck-sim drive          # walk forward for 8 s (args: vx vyaw, default 0.3 0)
+scripts/duck-sim web            # drive it from a browser at http://127.0.0.1:8765 — no camera
 scripts/duck-sim ctl health     # anything robotctl does, aimed at this duck
 scripts/duck-sim monitor        # robotctl monitor: joints, IMU, ToF, sticks
 scripts/duck-sim log            # robotd's log

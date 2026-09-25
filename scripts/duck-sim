@@ -3,6 +3,7 @@
 #
 #   scripts/duck-sim              # a window opens, the duck stands up, and it is yours
 #   scripts/duck-sim drive        # walk it forward for a few seconds
+#   scripts/duck-sim web          # drive it from a browser at http://127.0.0.1:8765
 #   scripts/duck-sim ctl health   # anything robotctl does
 #   scripts/duck-sim down
 #
@@ -1132,6 +1133,8 @@ case "${1:-up}" in
     shell)   shift; shell "$@" ;;
     down)    down_containers; down ;;
     drive)   shift; drive "$@" ;;
+    web)     shift; [ -S "$SOCK" ] || die "no duck. \`scripts/duck-sim\` first."
+             exec python3 "$REPO/scripts/duck-web/server.py" --socket "$SOCK" "$@" ;;
     ctl)     shift; ctl "$@" ;;
     stand)   stand && sleep 6 && upright ;;
     status)  ctl health | head -4; upright ;;
@@ -1139,5 +1142,5 @@ case "${1:-up}" in
     log)     tail -f "$STATE/robotd.log" ;;
     simlog)  tail -f "$STATE/body.log" ;;
     realtime) realtime ;;
-    *)       die "unknown command '$1'. Try: up, boot, shell, down, stand, drive, monitor, ctl, log, simlog, status, realtime" ;;
+    *)       die "unknown command '$1'. Try: up, boot, shell, down, stand, drive, web, monitor, ctl, log, simlog, status, realtime" ;;
 esac

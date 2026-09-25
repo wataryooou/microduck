@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duck controls</title>
+<!--
+  Served by scripts/duck-web/server.py, which relays every call to robotd's socket. The driving
+  model is the console's (mediad/webclient/index.html): one twist, resent at 10 Hz while it is
+  non-zero and once more when it returns to zero. robotd zeroes an intent 500 ms after they stop
+  arriving, so a closed tab stops the robot on its own.
+-->
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --dim: #6b6a65; --line: #deddd6;
+    --accent: #d98a00; --accent-ink: #1d1d1b; --good: #2e7d32; --warn: #b26a00; --bad: #c62828;
+    --trail: #3a6fb0; --grid: #ebeae4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --panel: #201f1c; --ink: #ecebe6; --dim: #9a988f; --line: #34332e;
+      --accent: #f0a820; --accent-ink: #161614; --good: #66bb6a; --warn: #ffb74d; --bad: #ef5350;
+      --trail: #7fb0ea; --grid: #2a2926;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  #link { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+  #link::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+  #link.up::before { background: var(--good); }
+  main {
+    display: grid; gap: 16px; padding: 16px; max-width: 1100px; margin: 0 auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px;
+  }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, select {
+    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--dim); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--bad); }
+  #drive { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; }
+  #stick {
+    width: 180px; height: 180px; border-radius: 50%; border: 1px solid var(--line);
+    background: radial-gradient(circle, var(--grid) 0 30%, var(--bg) 31%);
+    position: relative; touch-action: none; cursor: grab;
+  }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+    border-radius: 50%; background: var(--accent); pointer-events: none;
+  }
+  .keys { color: var(--dim); font-size: 13px; }
+  kbd {
+    font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 4px; padding: 0 5px; background: var(--bg);
+  }
+  label { color: var(--dim); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; }
+  dt { color: var(--dim); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  #map { width: 100%; aspect-ratio: 1; display: block; border-radius: 8px; background: var(--bg); }
+  #log {
+    font: 12px/1.5 ui-monospace, monospace; color: var(--dim); max-height: 140px; overflow: auto;
+    margin: 0; white-space: pre-wrap;
+  }
+  .wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Duck controls</h1>
+  <span id="link">connecting…</span>
+</header>
+
+<main>
+  <section>
+    <h2>Drive</h2>
+    <div id="drive">
+      <div id="stick" aria-label="Drag to drive: up is forward, sideways turns"><div id="knob"></div></div>
+      <div>
+        <p class="keys">
+          <kbd>W</kbd><kbd>S</kbd> forward / back<br>
+          <kbd>A</kbd><kbd>D</kbd> sideways<br>
+          <kbd>Q</kbd><kbd>E</kbd> turn<br>
+          <kbd>Space</kbd> stop
+        </p>
+        <label for="speed">top speed <span id="speed-value"></span></label>
+        <input id="speed" type="range" min="0.1" max="0.5" step="0.05" value="0.3">
+        <p class="keys">Below about 0.3 m/s the walk policy tends to stand still.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Robot</h2>
+    <div class="row">
+      <button class="primary" data-call="robot.enable" data-params='{"on":true}'>Stand up</button>
+      <button data-call="robot.stop">Stop</button>
+      <button data-call="robot.init">Init pose</button>
+      <button class="danger" data-call="robot.relax"
+              data-confirm="Cut power to the joints? The robot will collapse.">Relax</button>
+    </div>
+    <h2 style="margin-top:16px">Skills and sounds</h2>
+    <div class="row">
+      <select id="skill"><option>asking the robot…</option></select>
+      <button id="do">Do</button>
+      <select id="sound">
+        <option>chirp</option><option>greet</option><option>inquire</option>
+        <option>alarm</option><option>peck</option><option>coo</option>
+      </select>
+      <button id="play">Play</button>
+    </div>
+    <h2 style="margin-top:16px">State</h2>
+    <dl>
+      <dt>health</dt><dd id="s-health">–</dd>
+      <dt>policy</dt><dd id="s-policy">–</dd>
+      <dt>asked</dt><dd id="s-requested">–</dd>
+      <dt>applied</dt><dd id="s-applied">–</dd>
+      <dt>loop</dt><dd id="s-loop">–</dd>
+      <dt>battery</dt><dd id="s-battery">–</dd>
+      <dt>position</dt><dd id="s-odom">–</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Where it has been <button id="clear" style="float:right;padding:2px 8px">clear</button></h2>
+    <canvas id="map" width="600" height="600"></canvas>
+    <p class="keys">Top-down, from contact odometry. 1 m grid; the view follows the duck.</p>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MAX_ANGULAR = 1.5;
+const INTENT_HZ = 10;
+
+// ── calls ──────────────────────────────────────────────────────────────────────
+
+function log(text, cls) {
+  const line = document.createElement("div");
+  line.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
+  if (cls) line.className = cls;
+  $("log").prepend(line);
+  while ($("log").childElementCount > 100) $("log").lastChild.remove();
+}
+
+async function call(method, params = {}, quiet = false) {
+  const response = await fetch("/rpc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method, params }),
+  });
+  const body = await response.json();
+  if (!response.ok) { log(`${method}: ${body.error}`, "bad"); throw new Error(body.error); }
+  if (body.error) { log(`${method}: ${body.error.message}`, "bad"); throw new Error(body.error.message); }
+  const result = body.result;
+  if (result && result.accepted === false) log(`${method}: refused — ${result.reason || "no reason given"}`, "warn");
+  else if (!quiet) log(`${method} ✓`);
+  return result;
+}
+
+// Driving calls carry no id: robotd answers nothing, and ten a second would flood the log.
+function tell(method, params) {
+  fetch("/rpc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method, params, notify: true }),
+  }).catch(() => {});
+}
+
+document.querySelectorAll("[data-call]").forEach((button) => {
+  button.onclick = () => {
+    if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
+    call(button.dataset.call, JSON.parse(button.dataset.params || "{}")).catch(() => {});
+  };
+});
+$("do").onclick = () => call("robot.do", { skill: $("skill").value }).catch(() => {});
+$("play").onclick = () => call("robot.sound", { tag: $("sound").value }).catch(() => {});
+
+// The skills are the robot's config, so the menu is its answer rather than a list guessed here.
+call("robot.policies", {}, true).then((policies) => {
+  const names = (policies && policies.skills) || [];
+  $("skill").textContent = "";
+  for (const name of names) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name.replace(/_/g, " ");
+    $("skill").append(option);
+  }
+  if (!names.length) $("skill").innerHTML = "<option value=''>no skills</option>";
+}).catch(() => {});
+
+// ── driving ────────────────────────────────────────────────────────────────────
+
+const keys = new Set();
+const stick = { x: 0, y: 0 };  // -1..1, y up is forward
+let sending = false;
+
+const speed = () => Number($("speed").value);
+function showSpeed() { $("speed-value").textContent = `${speed().toFixed(2)} m/s`; }
+$("speed").oninput = showSpeed;
+showSpeed();
+
+function twist() {
+  const held = (k) => (keys.has(k) ? 1 : 0);
+  const keyVx = held("w") - held("s");
+  const keyVy = held("a") - held("d");
+  const keyYaw = held("q") - held("e");
+  // The stick wins where it is pushed: adding the two would make a key held while the stick is
+  // out produce a velocity neither asked for.
+  return {
+    vx: (stick.y || keyVx) * speed(),
+    vy: keyVy * speed(),
+    vyaw: (-stick.x || keyYaw) * MAX_ANGULAR,
+  };
+}
+
+function refresh() {
+  const t = twist();
+  if (t.vx || t.vy || t.vyaw) { sending = true; return; }
+  if (sending) { sending = false; tell("robot.move", { vx: 0, vy: 0, vyaw: 0 }); }
+}
+
+setInterval(() => { if (sending) tell("robot.move", twist()); }, 1000 / INTENT_HZ);
+
+addEventListener("keydown", (event) => {
+  if (event.target.closest && event.target.closest("select, input")) return;
+  const key = event.key.toLowerCase();
+  if (key === " ") { event.preventDefault(); keys.clear(); refresh(); call("robot.stop", {}, true).catch(() => {}); return; }
+  if (!"wasdqe".includes(key) || key.length !== 1) return;
+  event.preventDefault();
+  keys.add(key); refresh();
+});
+addEventListener("keyup", (event) => { keys.delete(event.key.toLowerCase()); refresh(); });
+// A key released while the window had no focus never sends its keyup.
+addEventListener("blur", () => { keys.clear(); refresh(); });
+// A hidden tab has its timers throttled to about once a second, which is slower than robotd's
+// 500 ms deadman: the robot would lurch, stop, and lurch again on a key nobody is holding.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { keys.clear(); stick.x = 0; stick.y = 0; moveKnob(); refresh(); }
+});
+
+const pad = $("stick");
+function moveKnob() {
+  const r = pad.clientWidth / 2 - 28;
+  $("knob").style.transform = `translate(${stick.x * r}px, ${-stick.y * r}px)`;
+}
+function fromPointer(event) {
+  const box = pad.getBoundingClientRect();
+  let x = (event.clientX - box.left) / (box.width / 2) - 1;
+  let y = 1 - (event.clientY - box.top) / (box.height / 2);
+  const length = Math.hypot(x, y);
+  if (length > 1) { x /= length; y /= length; }
+  // A small dead zone, so resting a finger on the knob does not creep.
+  stick.x = Math.abs(x) < 0.12 ? 0 : x;
+  stick.y = Math.abs(y) < 0.12 ? 0 : y;
+  moveKnob(); refresh();
+}
+pad.addEventListener("pointerdown", (event) => { pad.setPointerCapture(event.pointerId); fromPointer(event); });
+pad.addEventListener("pointermove", (event) => { if (pad.hasPointerCapture(event.pointerId)) fromPointer(event); });
+const release = () => { stick.x = 0; stick.y = 0; moveKnob(); refresh(); };
+pad.addEventListener("pointerup", release);
+pad.addEventListener("pointercancel", release);
+
+// ── state ──────────────────────────────────────────────────────────────────────
+
+const fmt = (v) => (v || [0, 0, 0]).map((n) => n.toFixed(2)).join("  ");
+const trail = [];
+let pose = null;
+
+function onState(state) {
+  $("s-policy").textContent = state.policy || "–";
+  const move = state.move || {};
+  $("s-requested").textContent = `${fmt(move.requested)}   (vx vy vyaw)`;
+  const limits = move.limited_by && move.limited_by.length ? `  limited by ${move.limited_by.join(", ")}` : "";
+  $("s-applied").textContent = fmt(move.applied) + limits;
+  const loop = state.loop || {};
+  $("s-loop").textContent = `${(loop.hz || 0).toFixed(1)} Hz · ${loop.missed || 0} missed`;
+  const odom = state.odom;
+  if (odom && odom.position) {
+    const [x, y] = odom.position;
+    pose = { x, y, yaw: odom.yaw || 0 };
+    $("s-odom").textContent = `x ${x.toFixed(2)} m  y ${y.toFixed(2)} m  yaw ${((pose.yaw * 180) / Math.PI).toFixed(0)}°`;
+    const last = trail[trail.length - 1];
+    if (!last || Math.hypot(last.x - x, last.y - y) > 0.01) trail.push({ x, y });
+    if (trail.length > 5000) trail.shift();
+  }
+  if (state.safety && state.safety.fallen) $("s-policy").innerHTML += " · <span class='bad'>fallen</span>";
+}
+
+function connectEvents() {
+  const events = new EventSource("/events");
+  events.onopen = () => { $("link").textContent = "connected"; $("link").className = "up"; };
+  events.onmessage = (event) => onState(JSON.parse(event.data));
+  events.onerror = () => { $("link").textContent = "no robot — retrying"; $("link").className = ""; };
+}
+connectEvents();
+
+// Health is not on the state stream; it is the one place a slow loop or a flat pack is named.
+async function pollHealth() {
+  try {
+    const h = await call("robot.health", {}, true);
+    const verdict = h.healthy ? "healthy" : (h.degraded ? "degraded" : "unhealthy");
+    $("s-health").textContent = h.reason ? `${verdict} — ${h.reason}` : verdict;
+    $("s-health").className = h.healthy ? "good" : (h.degraded ? "warn" : "bad");
+    $("s-battery").textContent = h.battery
+      ? `${h.battery.volts.toFixed(2)} V · ${Math.round(h.battery.percent)}%` : "not read";
+  } catch { $("s-health").textContent = "no answer"; $("s-health").className = "bad"; }
+}
+pollHealth();
+setInterval(pollHealth, 2000);
+
+// ── map ────────────────────────────────────────────────────────────────────────
+
+$("clear").onclick = () => { trail.length = 0; };
+
+function draw() {
+  const canvas = $("map");
+  const ctx = canvas.getContext("2d");
+  const css = getComputedStyle(document.documentElement);
+  const w = canvas.width, h = canvas.height;
+  const scale = 120;  // pixels per metre
+  const cx = pose ? pose.x : 0, cy = pose ? pose.y : 0;
+  // World x is forward at yaw 0; drawn upwards, with y (left) drawn to the left.
+  const toScreen = (x, y) => [w / 2 - (y - cy) * scale, h / 2 - (x - cx) * scale];
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = css.getPropertyValue("--grid");
+  ctx.lineWidth = 1;
+  for (let m = Math.floor(cx - 3); m <= cx + 3; m++) {
+    const [, sy] = toScreen(m, cy); ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w, sy); ctx.stroke();
+  }
+  for (let m = Math.floor(cy - 3); m <= cy + 3; m++) {
+    const [sx] = toScreen(cx, m); ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke();
+  }
+
+  if (trail.length > 1) {
+    ctx.strokeStyle = css.getPropertyValue("--trail");
+    ctx.lineWidth = 3; ctx.lineJoin = "round";
+    ctx.beginPath();
+    trail.forEach((p, i) => { const [sx, sy] = toScreen(p.x, p.y); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+    ctx.stroke();
+  }
+
+  if (pose) {
+    const [sx, sy] = toScreen(pose.x, pose.y);
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(-pose.yaw);
+    ctx.fillStyle = css.getPropertyValue("--accent");
+    ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(11, 12); ctx.lineTo(-11, 12); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
